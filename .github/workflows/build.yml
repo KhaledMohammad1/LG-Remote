@@ -11,9 +11,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -23,57 +20,72 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.9'
 
-      - name: Prepare Project & Build APK
+      - name: Generate Clean Project & Build APK
         run: |
-          if [ -d "LGRemoteApp" ]; then
-            cd LGRemoteApp
-          fi
+          rm -rf build_workspace
+          mkdir -p build_workspace
+          cd build_workspace
 
-          # 1. إنشاء أيقونة التطبيق تلقائياً لتجنب خطأ الموارد
-          mkdir -p app/src/main/res/drawable
-          cat << 'EOF' > app/src/main/res/drawable/ic_launcher.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path android:fillColor="#A50034" android:pathData="M0,0h108v108h-108z" />
-              <path android:fillColor="#FFFFFF" android:pathData="M38,24h32c4.4,0 8,3.6 8,8v44c0,4.4 -3.6,8 -8,8H38c-4.4,0 -8,-3.6 -8,-8V32C30,27.6 33.6,24 38,24zM54,44c-4.4,0 -8,3.6 -8,8s3.6,8 8,8s8,-3.6 8,-8S58.4,44 54,44z" />
-          </vector>
-          EOF
+          python3 - << 'PYEOF'
+          import os
 
-          # 2. ربط الأيقونة في AndroidManifest.xml
-          sed -i 's/@mipmap\/ic_launcher_round/@drawable\/ic_launcher/g' app/src/main/AndroidManifest.xml
-          sed -i 's/@mipmap\/ic_launcher/@drawable\/ic_launcher/g' app/src/main/AndroidManifest.xml
+          def w(path, content):
+              os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content.strip() + "\n")
 
-          # 3. تحديث ملفات Gradle لضمان عدم الاعتماد على ملفات خارجية مفقودة
-          cat << 'EOF' > build.gradle.kts
-          plugins {
-              id("com.android.application") version "8.7.2" apply false
-              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
-              id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+          w("settings.gradle.kts", """
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
           }
-          EOF
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "LGRemoteApp"
+          include(":app")
+          """)
 
-          cat << 'EOF' > app/build.gradle.kts
+          w("build.gradle.kts", """
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          """)
+
+          w("gradle.properties", """
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          """)
+
+          w("app/build.gradle.kts", """
           plugins {
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
-              id("org.jetbrains.kotlin.plugin.compose")
           }
+
           android {
               namespace = "com.example.lgremote"
-              compileSdk = 35
+              compileSdk = 34
+
               defaultConfig {
                   applicationId = "com.example.lgremote"
                   minSdk = 26
-                  targetSdk = 35
+                  targetSdk = 34
                   versionCode = 1
                   versionName = "1.0.0"
               }
+
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
@@ -84,30 +96,720 @@ jobs:
               buildFeatures {
                   compose = true
               }
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.14"
+              }
           }
+
           dependencies {
-              implementation("androidx.core:core-ktx:1.15.0")
-              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-              implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-              implementation("androidx.activity:activity-compose:1.9.3")
-              implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+              implementation("androidx.activity:activity-compose:1.9.1")
+              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
               implementation("androidx.compose.ui:ui")
               implementation("androidx.compose.ui:ui-graphics")
-              implementation("androidx.compose.ui:ui-tooling-preview")
               implementation("androidx.compose.material3:material3")
-              implementation("androidx.compose.material:material-icons-extended:1.7.5")
+              implementation("androidx.compose.material:material-icons-extended")
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
-              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-              implementation("io.coil-kt:coil-compose:2.7.0")
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
           }
-          EOF
+          """)
 
-          # 4. بناء ملف الـ APK
+          w("app/src/main/AndroidManifest.xml", """
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:label="LG Magic Remote"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.Material.NoActionBar"
+                  android:usesCleartextTraffic="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          """)
+
+          w("app/src/main/java/com/example/lgremote/model/TvModels.kt", """
+          package com.example.lgremote.model
+
+          data class TvApp(
+              val id: String,
+              val title: String
+          )
+
+          enum class ConnectionState {
+              DISCONNECTED,
+              CONNECTING,
+              WAITING_FOR_PAIRING,
+              CONNECTED,
+              ERROR
+          }
+          """)
+
+          w("app/src/main/java/com/example/lgremote/client/WakeOnLan.kt", """
+          package com.example.lgremote.client
+
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import java.net.DatagramPacket
+          import java.net.DatagramSocket
+          import java.net.InetAddress
+
+          object WakeOnLan {
+              suspend fun wake(macAddress: String, broadcastIp: String = "255.255.255.255", port: Int = 9) = withContext(Dispatchers.IO) {
+                  try {
+                      val cleanMac = macAddress.replace(":", "").replace("-", "").trim()
+                      if (cleanMac.length != 12) return@withContext false
+                      val macBytes = ByteArray(6)
+                      for (i in 0 until 6) {
+                          macBytes[i] = cleanMac.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+                      }
+                      val bytes = ByteArray(6 + 16 * 6)
+                      for (i in 0 until 6) bytes[i] = 0xFF.toByte()
+                      var offset = 6
+                      for (i in 0 until 16) {
+                          System.arraycopy(macBytes, 0, bytes, offset, 6)
+                          offset += 6
+                      }
+                      val address = InetAddress.getByName(broadcastIp)
+                      val packet = DatagramPacket(bytes, bytes.size, address, port)
+                      DatagramSocket().use { socket ->
+                          socket.broadcast = true
+                          socket.send(packet)
+                      }
+                      true
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+          }
+          """)
+
+          w("app/src/main/java/com/example/lgremote/client/WebOsClient.kt", """
+          package com.example.lgremote.client
+
+          import android.content.Context
+          import com.example.lgremote.model.ConnectionState
+          import com.example.lgremote.model.TvApp
+          import kotlinx.coroutines.CoroutineScope
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.flow.MutableStateFlow
+          import kotlinx.coroutines.flow.StateFlow
+          import kotlinx.coroutines.flow.asStateFlow
+          import kotlinx.coroutines.launch
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.Response
+          import okhttp3.WebSocket
+          import okhttp3.WebSocketListener
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.security.SecureRandom
+          import java.security.cert.X509Certificate
+          import java.util.concurrent.TimeUnit
+          import javax.net.ssl.SSLContext
+          import javax.net.ssl.TrustManager
+          import javax.net.ssl.X509TrustManager
+
+          class WebOsClient(private val context: Context) {
+              private val PREFS_NAME = "LGRemotePrefs"
+              private val KEY_CLIENT_KEY = "client_key"
+              private val scope = CoroutineScope(Dispatchers.IO)
+
+              private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+              val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+              private val _isMuted = MutableStateFlow(false)
+              val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
+
+              private val _installedApps = MutableStateFlow<List<TvApp>>(emptyList())
+              val installedApps: StateFlow<List<TvApp>> = _installedApps.asStateFlow()
+
+              private var mainWebSocket: WebSocket? = null
+              private var pointerWebSocket: WebSocket? = null
+              private var tvIp: String = ""
+
+              private val okHttpClient: OkHttpClient by lazy { createUnsafeOkHttpClient() }
+
+              private fun getSavedClientKey(): String? =
+                  context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_CLIENT_KEY, null)
+
+              private fun saveClientKey(key: String) {
+                  context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(KEY_CLIENT_KEY, key).apply()
+              }
+
+              fun connect(ip: String) {
+                  tvIp = ip.trim()
+                  disconnect()
+                  _connectionState.value = ConnectionState.CONNECTING
+                  scope.launch {
+                      val req = Request.Builder().url("wss://$tvIp:3001").build()
+                      mainWebSocket = okHttpClient.newWebSocket(req, object : WebSocketListener() {
+                          override fun onOpen(webSocket: WebSocket, response: Response) = sendRegistration(webSocket)
+                          override fun onMessage(webSocket: WebSocket, text: String) = handleMainSocketMessage(text)
+                          override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = connectWsFallback()
+                          override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                              _connectionState.value = ConnectionState.DISCONNECTED
+                          }
+                      })
+                  }
+              }
+
+              private fun connectWsFallback() {
+                  val req = Request.Builder().url("ws://$tvIp:3000").build()
+                  mainWebSocket = okHttpClient.newWebSocket(req, object : WebSocketListener() {
+                      override fun onOpen(webSocket: WebSocket, response: Response) = sendRegistration(webSocket)
+                      override fun onMessage(webSocket: WebSocket, text: String) = handleMainSocketMessage(text)
+                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                          _connectionState.value = ConnectionState.ERROR
+                      }
+                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                          _connectionState.value = ConnectionState.DISCONNECTED
+                      }
+                  })
+              }
+
+              private fun sendRegistration(ws: WebSocket) {
+                  val clientKey = getSavedClientKey()
+                  val regJson = JSONObject().apply {
+                      put("id", "register_0")
+                      put("type", "register")
+                      put("payload", JSONObject().apply {
+                          put("forcePairing", false)
+                          put("pairingType", "PROMPT")
+                          if (!clientKey.isNullOrEmpty()) put("client-key", clientKey)
+                          put("manifest", JSONObject().apply {
+                              put("manifestVersion", 1)
+                              put("appVersion", "1.0")
+                              put("signed", JSONObject().apply {
+                                  put("created", "20240101")
+                                  put("appId", "com.example.lgremote")
+                                  put("vendorId", "com.example")
+                                  put("localizedAppNames", JSONObject().apply {
+                                      put("", "LG Magic Remote")
+                                      put("ar", "ريموت إل جي الذكي")
+                                  })
+                                  put("permissions", JSONArray(listOf(
+                                      "LAUNCH", "LAUNCH_WEBAPP", "APP_TO_APP", "CLOSE",
+                                      "CONTROL_AUDIO", "CONTROL_INPUT_TV", "CONTROL_POWER",
+                                      "READ_INSTALLED_APPS", "READ_CURRENT_CHANNEL", "READ_RUNNING_APPS",
+                                      "WRITE_NOTIFICATION_TOAST"
+                                  )))
+                              })
+                              put("permissions", JSONArray(listOf(
+                                  "LAUNCH", "CONTROL_AUDIO", "CONTROL_INPUT_TV", "READ_INSTALLED_APPS", "CONTROL_POWER"
+                              )))
+                          })
+                      })
+                  }
+                  if (clientKey.isNullOrEmpty()) _connectionState.value = ConnectionState.WAITING_FOR_PAIRING
+                  ws.send(regJson.toString())
+              }
+
+              private fun handleMainSocketMessage(text: String) {
+                  try {
+                      val json = JSONObject(text)
+                      val type = json.optString("type")
+                      val id = json.optString("id")
+                      val payload = json.optJSONObject("payload")
+                      when (type) {
+                          "registered" -> {
+                              val key = payload?.optString("client-key")
+                              if (!key.isNullOrEmpty()) saveClientKey(key)
+                              _connectionState.value = ConnectionState.CONNECTED
+                              requestPointerSocket()
+                              fetchInstalledApps()
+                              showToast("تم اتصال ريموت Redmi A3 بنجاح")
+                          }
+                          "response" -> {
+                              if (id == "req_pointer" && payload != null) {
+                                  val path = payload.optString("socketPath")
+                                  if (path.isNotEmpty()) connectPointerSocket(path)
+                              } else if (id == "req_apps" && payload != null) {
+                                  parseApps(payload)
+                              }
+                          }
+                      }
+                  } catch (e: Exception) {}
+              }
+
+              private fun requestPointerSocket() {
+                  sendRequest("req_pointer", "ssap://com.webos.service.networkinput/getPointerInputSocket")
+              }
+
+              private fun connectPointerSocket(socketPath: String) {
+                  val req = Request.Builder().url(socketPath).build()
+                  pointerWebSocket = okHttpClient.newWebSocket(req, object : WebSocketListener() {})
+              }
+
+              fun sendPointerMove(dx: Float, dy: Float) {
+                  pointerWebSocket?.send("type:move\\ndx:${dx.toInt()}\\ndy:${dy.toInt()}\\ndown:0\\n\\n")
+              }
+
+              fun sendPointerClick() {
+                  pointerWebSocket?.send("type:click\\n\\n")
+              }
+
+              fun sendPointerScroll(dy: Int) {
+                  pointerWebSocket?.send("type:scroll\\ndx:0\\ndy:$dy\\n\\n")
+              }
+
+              fun sendPointerButton(name: String) {
+                  val sent = pointerWebSocket?.send("type:button\\nname:$name\\n\\n") ?: false
+                  if (!sent) {
+                      if (name == "HOME") sendRequest("btn_home", "ssap://system.launcher/open")
+                  }
+              }
+
+              fun fetchInstalledApps() {
+                  sendRequest("req_apps", "ssap://com.webos.applicationManager/listLaunchPoints")
+              }
+
+              private fun parseApps(payload: JSONObject) {
+                  val array = payload.optJSONArray("launchPoints") ?: return
+                  val list = mutableListOf<TvApp>()
+                  for (i in 0 until array.length()) {
+                      val item = array.getJSONObject(i)
+                      list.add(TvApp(id = item.optString("id"), title = item.optString("title")))
+                  }
+                  _installedApps.value = list
+              }
+
+              fun launchApp(appId: String) =
+                  sendRequest("launch_$appId", "ssap://system.launcher/launch", JSONObject().put("id", appId))
+
+              fun volumeUp() = sendRequest("vol_up", "ssap://audio/volumeUp")
+              fun volumeDown() = sendRequest("vol_down", "ssap://audio/volumeDown")
+
+              fun toggleMute(muted: Boolean) {
+                  _isMuted.value = muted
+                  sendRequest("mute", "ssap://audio/setMute", JSONObject().put("mute", muted))
+              }
+
+              fun channelUp() = sendRequest("ch_up", "ssap://tv/channelUp")
+              fun channelDown() = sendRequest("ch_down", "ssap://tv/channelDown")
+
+              fun turnOff() {
+                  sendRequest("power_off", "ssap://system/turnOff")
+                  disconnect()
+              }
+
+              fun play() = sendRequest("play", "ssap://media.controls/play")
+              fun pause() = sendRequest("pause", "ssap://media.controls/pause")
+
+              fun showToast(message: String) =
+                  sendRequest("toast", "ssap://system.notifications/createToast", JSONObject().put("message", message))
+
+              private fun sendRequest(id: String, uri: String, payload: JSONObject? = null) {
+                  val json = JSONObject().apply {
+                      put("id", id)
+                      put("type", "request")
+                      put("uri", uri)
+                      if (payload != null) put("payload", payload)
+                  }
+                  mainWebSocket?.send(json.toString())
+              }
+
+              fun disconnect() {
+                  try {
+                      pointerWebSocket?.close(1000, "Bye")
+                      mainWebSocket?.close(1000, "Bye")
+                  } catch (e: Exception) {}
+                  pointerWebSocket = null
+                  mainWebSocket = null
+                  _connectionState.value = ConnectionState.DISCONNECTED
+              }
+
+              private fun createUnsafeOkHttpClient(): OkHttpClient {
+                  val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                      override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                      override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                      override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                  })
+                  val ssl = SSLContext.getInstance("SSL").apply { init(null, trustAll, SecureRandom()) }
+                  return OkHttpClient.Builder()
+                      .sslSocketFactory(ssl.socketFactory, trustAll[0] as X509TrustManager)
+                      .hostnameVerifier { _, _ -> true }
+                      .connectTimeout(5, TimeUnit.SECONDS)
+                      .readTimeout(0, TimeUnit.MILLISECONDS)
+                      .build()
+              }
+          }
+          """)
+
+          w("app/src/main/java/com/example/lgremote/MainActivity.kt", """
+          package com.example.lgremote
+
+          import android.os.Bundle
+          import android.view.HapticFeedbackConstants
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.gestures.detectDragGestures
+          import androidx.compose.foundation.gestures.detectTapGestures
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.grid.GridCells
+          import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+          import androidx.compose.foundation.lazy.grid.items
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.vector.ImageVector
+          import androidx.compose.ui.input.pointer.pointerInput
+          import androidx.compose.ui.platform.LocalView
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import com.example.lgremote.client.WakeOnLan
+          import com.example.lgremote.client.WebOsClient
+          import com.example.lgremote.model.ConnectionState
+          import com.example.lgremote.model.TvApp
+          import kotlinx.coroutines.launch
+
+          val DarkBackground = Color(0xFF121418)
+          val SurfaceDark = Color(0xFF1E222B)
+          val LGRed = Color(0xFFA50034)
+          val AccentCyan = Color(0xFF00E5FF)
+          val CardBackground = Color(0xFF262C38)
+          val TextPrimary = Color(0xFFEEEEEE)
+          val TextSecondary = Color(0xFFA0AAB8)
+
+          class MainActivity : ComponentActivity() {
+              private lateinit var client: WebOsClient
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  client = WebOsClient(this)
+                  setContent {
+                      MaterialTheme(
+                          colorScheme = darkColorScheme(
+                              primary = LGRed,
+                              secondary = AccentCyan,
+                              background = DarkBackground,
+                              surface = SurfaceDark
+                          )
+                      ) {
+                          MainScreen(client)
+                      }
+                  }
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  client.disconnect()
+              }
+          }
+
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable
+          fun MainScreen(client: WebOsClient) {
+              val connectionState by client.connectionState.collectAsState()
+              var selectedTab by remember { mutableIntStateOf(0) }
+              var showConnectDialog by remember { mutableStateOf(false) }
+              var tvIpAddress by remember { mutableStateOf("192.168.1.50") }
+              var tvMacAddress by remember { mutableStateOf("") }
+              val scope = rememberCoroutineScope()
+              val snackbarHostState = remember { SnackbarHostState() }
+
+              Scaffold(
+                  snackbarHost = { SnackbarHost(snackbarHostState) },
+                  topBar = {
+                      TopAppBar(
+                          title = {
+                              Column {
+                                  Text("LG 50UP7550PVG", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                  Text(
+                                      text = when (connectionState) {
+                                          ConnectionState.CONNECTED -> "متصل (webOS 6.5.3)"
+                                          ConnectionState.WAITING_FOR_PAIRING -> "وافق على الشاشة الآن (Allow)"
+                                          ConnectionState.CONNECTING -> "جارٍ الاتصال..."
+                                          ConnectionState.ERROR -> "فشل الاتصال - تأكد من الـ IP"
+                                          ConnectionState.DISCONNECTED -> "اضغط على رمز الواي فاي للاتصال"
+                                      },
+                                      fontSize = 11.sp,
+                                      color = AccentCyan
+                                  )
+                              }
+                          },
+                          actions = {
+                              IconButton(onClick = {
+                                  if (tvMacAddress.isNotEmpty()) {
+                                      scope.launch {
+                                          val ok = WakeOnLan.wake(tvMacAddress)
+                                          snackbarHostState.showSnackbar(if (ok) "تم إرسال إشارة التشغيل (WOL)" else "تأكد من الـ MAC")
+                                      }
+                                  } else {
+                                      showConnectDialog = true
+                                  }
+                              }) {
+                                  Icon(Icons.Default.Power, contentDescription = "WOL", tint = AccentCyan)
+                              }
+                              IconButton(onClick = { showConnectDialog = true }) {
+                                  Icon(
+                                      imageVector = if (connectionState == ConnectionState.CONNECTED) Icons.Default.Wifi else Icons.Default.WifiOff,
+                                      contentDescription = "Connect",
+                                      tint = if (connectionState == ConnectionState.CONNECTED) Color(0xFF4CAF50) else Color(0xFFF44336)
+                                  )
+                              }
+                          },
+                          colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceDark)
+                      )
+                  },
+                  bottomBar = {
+                      NavigationBar(containerColor = SurfaceDark) {
+                          NavigationBarItem(
+                              selected = selectedTab == 0,
+                              onClick = { selectedTab = 0 },
+                              icon = { Icon(Icons.Default.TouchApp, contentDescription = null) },
+                              label = { Text("الماوس السحري") }
+                          )
+                          NavigationBarItem(
+                              selected = selectedTab == 1,
+                              onClick = { selectedTab = 1 },
+                              icon = { Icon(Icons.Default.Gamepad, contentDescription = null) },
+                              label = { Text("الريموت") }
+                          )
+                          NavigationBarItem(
+                              selected = selectedTab == 2,
+                              onClick = { selectedTab = 2 },
+                              icon = { Icon(Icons.Default.Apps, contentDescription = null) },
+                              label = { Text("البرامج") }
+                          )
+                      }
+                  }
+              ) { padding ->
+                  Box(modifier = Modifier.fillMaxSize().padding(padding).background(DarkBackground)) {
+                      when (selectedTab) {
+                          0 -> TouchpadScreen(client)
+                          1 -> RemoteScreen(client)
+                          2 -> AppLauncherScreen(client)
+                      }
+                  }
+              }
+
+              if (showConnectDialog) {
+                  AlertDialog(
+                      onDismissRequest = { showConnectDialog = false },
+                      title = { Text("الاتصال بشاشة LG") },
+                      text = {
+                          Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              OutlinedTextField(
+                                  value = tvIpAddress,
+                                  onValueChange = { tvIpAddress = it },
+                                  label = { Text("عنوان IP الشاشة") },
+                                  singleLine = true
+                              )
+                              OutlinedTextField(
+                                  value = tvMacAddress,
+                                  onValueChange = { tvMacAddress = it },
+                                  label = { Text("MAC Address (اختياري للتشغيل)") },
+                                  singleLine = true
+                              )
+                          }
+                      },
+                      confirmButton = {
+                          Button(onClick = {
+                              showConnectDialog = false
+                              client.connect(tvIpAddress)
+                          }) { Text("اتصال") }
+                      }
+                  )
+              }
+          }
+
+          @Composable
+          fun TouchpadScreen(client: WebOsClient) {
+              val view = LocalView.current
+              var sensitivity by remember { mutableFloatStateOf(1.8f) }
+
+              Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                      Button(onClick = { client.sendPointerButton("BACK") }) { Text("رجوع") }
+                      Button(onClick = { client.sendPointerButton("HOME") }) { Text("القائمة Home") }
+                  }
+                  Spacer(modifier = Modifier.height(12.dp))
+                  Box(
+                      modifier = Modifier
+                          .fillMaxWidth()
+                          .weight(1f)
+                          .clip(RoundedCornerShape(24.dp))
+                          .background(SurfaceDark)
+                          .border(2.dp, CardBackground, RoundedCornerShape(24.dp))
+                          .pointerInput(Unit) {
+                              detectTapGestures(onTap = {
+                                  view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
+                                  client.sendPointerClick()
+                              })
+                          }
+                          .pointerInput(sensitivity) {
+                              detectDragGestures(onDrag = { change, drag ->
+                                  change.consume()
+                                  client.sendPointerMove(drag.x * sensitivity, drag.y * sensitivity)
+                              })
+                          },
+                      contentAlignment = Alignment.Center
+                  ) {
+                      Text(
+                          text = "حرّك إصبعك هنا لتحريك مؤشر الماوس على الشاشة\\nالمس مرة للضغط (Click)",
+                          color = TextSecondary,
+                          textAlign = TextAlign.Center
+                      )
+                      Box(
+                          modifier = Modifier
+                              .align(Alignment.CenterEnd)
+                              .padding(end = 8.dp)
+                              .width(44.dp)
+                              .fillMaxHeight(0.7f)
+                              .clip(RoundedCornerShape(12.dp))
+                              .background(CardBackground)
+                              .pointerInput(Unit) {
+                                  detectDragGestures { change, drag ->
+                                      change.consume()
+                                      client.sendPointerScroll(if (drag.y > 0) -1 else 1)
+                                  }
+                              },
+                          contentAlignment = Alignment.Center
+                      ) {
+                          Text("عجلة\\nتمرير", color = AccentCyan, fontSize = 10.sp, textAlign = TextAlign.Center)
+                      }
+                  }
+                  Spacer(modifier = Modifier.height(12.dp))
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                      Text("السرعة:", color = TextSecondary, fontSize = 12.sp)
+                      Slider(value = sensitivity, onValueChange = { sensitivity = it }, valueRange = 0.8f..3.5f)
+                  }
+              }
+          }
+
+          @Composable
+          fun RemoteScreen(client: WebOsClient) {
+              val isMuted by client.isMuted.collectAsState()
+              Column(
+                  modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  verticalArrangement = Arrangement.spacedBy(16.dp)
+              ) {
+                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                      Button(onClick = { client.turnOff() }, colors = ButtonDefaults.buttonColors(containerColor = LGRed)) {
+                          Text("إيقاف التشغيل Power Off")
+                      }
+                      Button(onClick = { client.sendPointerButton("INPUT") }) {
+                          Text("المداخل HDMI")
+                      }
+                  }
+
+                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          Button(onClick = { client.volumeUp() }) { Text("VOL +") }
+                          Text("الصوت", color = TextSecondary)
+                          Button(onClick = { client.volumeDown() }) { Text("VOL -") }
+                      }
+                      Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                          Button(onClick = { client.toggleMute(!isMuted) }) { Text(if (isMuted) "إلغاء الكتم" else "كتم Mute") }
+                          Button(onClick = { client.sendPointerButton("HOME") }) { Text("الرئيسية Home") }
+                      }
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          Button(onClick = { client.channelUp() }) { Text("CH +") }
+                          Text("القنوات", color = TextSecondary)
+                          Button(onClick = { client.channelDown() }) { Text("CH -") }
+                      }
+                  }
+
+                  // D-Pad
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                      Button(onClick = { client.sendPointerButton("UP") }) { Text("▲") }
+                      Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                          Button(onClick = { client.sendPointerButton("LEFT") }) { Text("◄") }
+                          Button(onClick = { client.sendPointerButton("ENTER") }, colors = ButtonDefaults.buttonColors(containerColor = LGRed)) { Text("OK") }
+                          Button(onClick = { client.sendPointerButton("RIGHT") }) { Text("►") }
+                      }
+                      Button(onClick = { client.sendPointerButton("DOWN") }) { Text("▼") }
+                  }
+
+                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                      Button(onClick = { client.sendPointerButton("BACK") }) { Text("رجوع") }
+                      Button(onClick = { client.play() }) { Text("تشغيل ▶") }
+                      Button(onClick = { client.pause() }) { Text("إيقاف ⏸") }
+                      Button(onClick = { client.sendPointerButton("EXIT") }) { Text("خروج") }
+                  }
+              }
+          }
+
+          @Composable
+          fun AppLauncherScreen(client: WebOsClient) {
+              val apps by client.installedApps.collectAsState()
+              val defaultApps = listOf(
+                  TvApp("youtube.leanback.v4", "YouTube"),
+                  TvApp("netflix", "Netflix"),
+                  TvApp("shahid", "Shahid VIP"),
+                  TvApp("com.webos.app.browser", "Web Browser"),
+                  TvApp("com.webos.app.livetv", "Live TV"),
+                  TvApp("com.webos.app.hdmi1", "HDMI 1"),
+                  TvApp("com.webos.app.hdmi2", "HDMI 2"),
+                  TvApp("amazon", "Prime Video")
+              )
+              val list = if (apps.isNotEmpty()) apps else defaultApps
+
+              Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                      Text("برامج الشاشة", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                      Button(onClick = { client.fetchInstalledApps() }) { Text("تحديث") }
+                  }
+                  Spacer(modifier = Modifier.height(12.dp))
+                  LazyVerticalGrid(
+                      columns = GridCells.Fixed(2),
+                      horizontalArrangement = Arrangement.spacedBy(10.dp),
+                      verticalArrangement = Arrangement.spacedBy(10.dp)
+                  ) {
+                      items(list) { app ->
+                          Card(
+                              modifier = Modifier.fillMaxWidth().height(70.dp).clickable { client.launchApp(app.id) },
+                              colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+                          ) {
+                              Box(modifier = Modifier.fillMaxSize().padding(8.dp), contentAlignment = Alignment.Center) {
+                                  Text(app.title, color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          """)
+          print("All source files generated cleanly without indentation issues!")
+          PYEOF
+
           gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: LG-Magic-Remote-App
-          path: "**/app/build/outputs/apk/debug/app-debug.apk"
+          path: "build_workspace/app/build/outputs/apk/debug/app-debug.apk"
           retention-days: 14
